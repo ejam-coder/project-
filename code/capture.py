@@ -1,7 +1,9 @@
 import cv2
 import mediapipe as mp
 import numpy as np
+
 from state_machine import PlayerState
+from classify_rules import classify_pose
 
 mp_pose = mp.solutions.pose
 mp_draw = mp.solutions.drawing_utils
@@ -16,10 +18,10 @@ pose = mp_pose.Pose(
     min_tracking_confidence=0.6
 )
 
-# Creamos dos jugadores
+# Jugadores (Player 1 y Player 2)
 players = {
-    0: PlayerState(player_id=0),
-    1: PlayerState(player_id=1)
+    1: PlayerState(player_id=1),
+    2: PlayerState(player_id=2)
 }
 
 def extract_landmarks(results):
@@ -29,6 +31,9 @@ def extract_landmarks(results):
             landmarks.append(np.array([lm.x, lm.y, lm.z]))
     return landmarks
 
+# =========================
+# MAIN LOOP
+# =========================
 while cap.isOpened():
     ret, frame = cap.read()
     if not ret:
@@ -38,38 +43,51 @@ while cap.isOpened():
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     results = pose.process(rgb)
 
-    h, w, _ = frame.shape
-
     if results.pose_landmarks:
-        # Para demo: duplicamos landmarks como si fueran 2 jugadores
-        # (MediaPipe Pose no distingue IDs, esto es aceptable para prototipo)
-        landmarks = extract_landmarks(results)
+        landmarks_np = extract_landmarks(results)
 
         for pid, player in players.items():
-            player.update_landmarks(landmarks)
-            player.update_state()
+            player.update_state(landmarks_np)
 
+            # Clasificar SOLO cuando está listo
+            if player.state == "AwaitAction":
+                action = classify_pose(results.pose_landmarks.landmark)
+                if action != "NONE":
+                    player.state = "ActionDetected"
+                    player.last_action = action
+
+            # Dibujar esqueleto
             mp_draw.draw_landmarks(
                 frame,
                 results.pose_landmarks,
                 mp_pose.POSE_CONNECTIONS
             )
 
+            # UI
             cv2.putText(
                 frame,
                 f"Player {pid} - {player.state}",
-                (20, 40 + pid * 30),
+                (20, 40 + (pid - 1) * 60),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.8,
                 (0, 255, 0),
                 2
             )
 
-    cv2.imshow("Pose Detection - Day 2", frame)
+            cv2.putText(
+                frame,
+                f"Action: {player.last_action}",
+                (20, 70 + (pid - 1) * 60),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (0, 255, 255),
+                2
+            )
+
+    cv2.imshow("Pose Detection - Day 3", frame)
 
     if cv2.waitKey(1) & 0xFF == 27:
         break
 
 cap.release()
 cv2.destroyAllWindows()
-
